@@ -1,5 +1,5 @@
 ---
-name: mdownreview-review
+name: review
 description: "Use when .review.json sidecar files exist alongside source files — orchestrates the full review cycle: read comments, fix code, respond, resolve, and clean up"
 ---
 
@@ -12,7 +12,7 @@ Orchestrate the full review cycle: read all unresolved comments, fix the code, r
 ### Step 1 — Read all unresolved comments
 
 ```bash
-python scripts/mdownreview.py read --format json
+python skills/mdownreview.py read --format json
 ```
 
 Parse the JSON output. Each entry has `reviewFile`, `sourceFile`, and `comments` array.
@@ -27,18 +27,18 @@ For each source file with unresolved comments:
    - Make the code change to address the feedback
    - Record what you did:
      ```bash
-     python scripts/mdownreview.py respond <review-json-file> <comment-id> "<what you did>"
+     python skills/mdownreview.py respond <review-json-file> <comment-id> "<what you did>"
      ```
    - Mark the comment resolved:
      ```bash
-     python scripts/mdownreview.py resolve <review-json-file> <comment-id>
+     python skills/mdownreview.py resolve <review-json-file> <comment-id>
      ```
 3. **Commit** changes for that file (or group of related files)
 
 ### Step 3 — Clean up resolved sidecars
 
 ```bash
-python scripts/mdownreview.py cleanup
+python skills/mdownreview.py cleanup
 ```
 
 This deletes `.review.json` files where every comment has been resolved.

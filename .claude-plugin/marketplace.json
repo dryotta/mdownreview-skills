@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "mdownreview-skills",
+      "name": "mdownreview",
       "source": {
         "source": "url",
         "url": "https://github.com/dryotta/mdownreview-skills.git"

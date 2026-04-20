@@ -1,5 +1,5 @@
 ---
-name: mdownreview-read
+name: read
 description: "Use when .review.json sidecar files exist alongside source files — reads unresolved review comments for the agent to address"
 ---
 
@@ -10,7 +10,7 @@ Scan for `.review.json` sidecar files and display outstanding review comments.
 ## Usage
 
 ```bash
-python scripts/mdownreview.py read [path] [--format json|text] [--all]
+python skills/mdownreview.py read [path] [--format json|text] [--all]
 ```
 
 - Default: scans current directory recursively, shows only unresolved comments

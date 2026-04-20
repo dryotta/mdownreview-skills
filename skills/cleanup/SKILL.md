@@ -1,5 +1,5 @@
 ---
-name: mdownreview-cleanup
+name: cleanup
 description: "Use to clean up .review.json sidecar files after all review comments have been resolved"
 ---
 
@@ -10,7 +10,7 @@ Delete `.review.json` sidecar files where every comment has been resolved.
 ## Usage
 
 ```bash
-python scripts/mdownreview.py cleanup [path] [--dry-run]
+python skills/mdownreview.py cleanup [path] [--dry-run]
 ```
 
 - Default: scans current directory recursively

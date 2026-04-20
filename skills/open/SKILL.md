@@ -1,5 +1,5 @@
 ---
-name: mdownreview-open
+name: open
 description: "Use to open the mDown reView desktop app on the current project folder for visual review of comments"
 ---
 
@@ -10,7 +10,7 @@ Find and launch the mDown reView desktop app to visually review `.review.json` s
 ## Usage
 
 ```bash
-python scripts/mdownreview.py open [path]
+python skills/mdownreview.py open [path]
 ```
 
 - Default: opens the current working directory
