@@ -15,13 +15,314 @@ import datetime
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-import yaml
+
+# ---------------------------------------------------------------------------
+# Pure-Python YAML subset for MRSF v1.0 sidecar files
+# ---------------------------------------------------------------------------
+
+_YAML_KEY_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)')
+_YAML_NEEDS_QUOTE = re.compile(
+    r"^['\"{}\[\]#&*!|>%@`,]"   # special first char
+    r"|^-[^ \t\n]"               # dash not followed by space/newline
+    r"|: "                       # colon-space (mapping separator)
+    r"| #"                       # space-hash (comment)
+    r"|\s$"                      # trailing whitespace
+    r"|[\x00-\x1f]"              # control chars (includes \n, \t, \r)
+)
+_YAML_BOOL_NULL_INT = re.compile(r'^(true|false|null|~|-?\d+)$', re.I)
+_YAML_FLOAT_LIKE = re.compile(r'^-?\d*\.\d+([eE][+-]?\d+)?$')
+
+_YAML_DQ_ESC: dict[str, str] = {
+    'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\',
+    'b': '\b', 'f': '\f', '0': '\0', 'a': '\a', 'v': '\v',
+    'e': '\x1b', 'N': '\x85', '_': '\xa0', 'L': ' ', 'P': ' ',
+}
+
+
+def _yaml_unescape_dq(s: str) -> str:
+    out, i = [], 0
+    while i < len(s):
+        if s[i] == '\\' and i + 1 < len(s):
+            c = s[i + 1]
+            if c in _YAML_DQ_ESC:
+                out.append(_YAML_DQ_ESC[c])
+                i += 2
+            elif c == 'x' and i + 3 < len(s):
+                out.append(chr(int(s[i+2:i+4], 16)))
+                i += 4
+            elif c == 'u' and i + 5 < len(s):
+                out.append(chr(int(s[i+2:i+6], 16)))
+                i += 6
+            elif c == 'U' and i + 9 < len(s):
+                out.append(chr(int(s[i+2:i+10], 16)))
+                i += 10
+            else:
+                out.append(s[i])
+                i += 1
+        else:
+            out.append(s[i])
+            i += 1
+    return ''.join(out)
+
+
+def _yaml_loads(text: str) -> object:
+    """Parse YAML into Python objects. Handles the full MRSF v1.0 subset."""
+    # Use split('\n') rather than splitlines() so that a literal \r inside a
+    # YAML scalar value does not split the line and corrupt the parse.
+    lines = text.split('\n')
+    pos = [0]
+
+    def skip_empty() -> None:
+        while pos[0] < len(lines):
+            s = lines[pos[0]].lstrip()
+            if s and not s.startswith('#'):
+                return
+            pos[0] += 1
+
+    def indent_of(line: str) -> int:
+        return len(line) - len(line.lstrip(' '))
+
+    def parse_scalar(s: str) -> object:
+        s = s.strip()
+        if not s or s in ('null', '~'):
+            return None
+        if s == 'true':
+            return True
+        if s == 'false':
+            return False
+        if s == '[]':
+            return []
+        if s == '{}':
+            return {}
+        try:
+            return int(s)
+        except ValueError:
+            pass
+        if len(s) >= 2 and s[0] == "'" and s[-1] == "'":
+            return s[1:-1].replace("''", "'")
+        if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+            return _yaml_unescape_dq(s[1:-1])
+        return s
+
+    def parse_block_scalar(header: str, base_ind: int) -> str:
+        style = '|' if '|' in header else '>'
+        rest = header.strip().lstrip('|>').strip()
+        chomp = 'clip'
+        if rest.startswith('+'):
+            chomp = 'keep'
+        elif rest.startswith('-'):
+            chomp = 'strip'
+
+        block_lines: list[str] = []
+        block_ind: int | None = None
+        while pos[0] < len(lines):
+            raw = lines[pos[0]].rstrip()
+            if raw.strip() == '':
+                block_lines.append('')
+                pos[0] += 1
+                continue
+            ind = indent_of(raw)
+            if block_ind is None:
+                if ind <= base_ind:
+                    break
+                block_ind = ind
+            if ind < block_ind:
+                break
+            block_lines.append(raw[block_ind:])
+            pos[0] += 1
+
+        if not block_lines:
+            return '' if chomp == 'strip' else '\n'
+
+        if style == '|':
+            content = '\n'.join(block_lines)
+        else:
+            parts: list[str] = []
+            for bl in block_lines:
+                if bl == '':
+                    parts.append('\n\n')
+                elif parts and not parts[-1].endswith('\n'):
+                    parts[-1] += ' ' + bl
+                else:
+                    parts.append(bl)
+            content = ''.join(parts)
+
+        if chomp == 'strip':
+            return content.rstrip('\n')
+        if chomp == 'keep':
+            return content + '\n'
+        return content.rstrip('\n') + '\n'
+
+    def parse_mapping(map_ind: int) -> dict:
+        result: dict = {}
+        while True:
+            skip_empty()
+            if pos[0] >= len(lines):
+                break
+            line = lines[pos[0]]
+            if indent_of(line) != map_ind:
+                break
+            m = _YAML_KEY_RE.match(line.lstrip())
+            if not m:
+                break
+            key, val_s = m.group(1), m.group(2).rstrip()
+            pos[0] += 1
+
+            if val_s == '':
+                skip_empty()
+                if pos[0] < len(lines):
+                    nind = indent_of(lines[pos[0]])
+                    ns = lines[pos[0]].lstrip()
+                    is_seq = ns.startswith('- ') or ns == '-'
+                    # Block sequences may sit at the same indent as the mapping key
+                    # (valid YAML). Nested mappings must be strictly deeper.
+                    if nind > map_ind or (nind == map_ind and is_seq):
+                        result[key] = (
+                            parse_sequence(nind) if is_seq
+                            else parse_mapping(nind)
+                        )
+                    else:
+                        result[key] = None
+                else:
+                    result[key] = None
+            elif val_s[0] in ('|', '>'):
+                result[key] = parse_block_scalar(val_s, map_ind)
+            else:
+                result[key] = parse_scalar(val_s)
+        return result
+
+    def next_block_value(item_ind: int) -> object:
+        skip_empty()
+        if pos[0] >= len(lines) or indent_of(lines[pos[0]]) < item_ind:
+            return None
+        nind = indent_of(lines[pos[0]])
+        ns = lines[pos[0]].lstrip()
+        return (parse_sequence(nind) if (ns.startswith('- ') or ns == '-')
+                else parse_mapping(nind))
+
+    def parse_sequence(seq_ind: int) -> list:
+        result: list = []
+        while True:
+            skip_empty()
+            if pos[0] >= len(lines):
+                break
+            line = lines[pos[0]]
+            if indent_of(line) != seq_ind:
+                break
+            s = line.lstrip()
+            if not (s.startswith('- ') or s == '-'):
+                break
+            pos[0] += 1
+            item_ind = seq_ind + 2
+            rest = (s[2:] if s.startswith('- ') else '').rstrip()
+
+            if rest == '':
+                result.append(next_block_value(item_ind))
+            elif rest[0] in ('|', '>'):
+                result.append(parse_block_scalar(rest, item_ind))
+            else:
+                mm = _YAML_KEY_RE.match(rest)
+                if mm:
+                    fk, fv_s = mm.group(1), mm.group(2).rstrip()
+                    if fv_s == '':
+                        fv = next_block_value(item_ind)
+                    elif fv_s[0] in ('|', '>'):
+                        fv = parse_block_scalar(fv_s, item_ind)
+                    else:
+                        fv = parse_scalar(fv_s)
+                    item: dict = {fk: fv}
+                    item.update(parse_mapping(item_ind))
+                    result.append(item)
+                else:
+                    result.append(parse_scalar(rest))
+        return result
+
+    skip_empty()
+    if pos[0] >= len(lines):
+        return None
+    s = lines[pos[0]].lstrip()
+    ind = indent_of(lines[pos[0]])
+    return parse_sequence(ind) if (s.startswith('- ') or s == '-') else parse_mapping(ind)
+
+
+def _yaml_quote_str(s: str) -> str:
+    """Return the YAML scalar representation of string s."""
+    if not s:
+        return "''"
+    if _YAML_BOOL_NULL_INT.match(s) or _YAML_FLOAT_LIKE.match(s) or _YAML_NEEDS_QUOTE.search(s):
+        if "'" not in s and '\n' not in s and '\r' not in s:
+            return f"'{s}'"
+        escaped = (s.replace('\\', '\\\\').replace('"', '\\"')
+                   .replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t'))
+        return f'"{escaped}"'
+    return s
+
+
+def _yaml_scalar_repr(v: object) -> str:
+    if v is None:
+        return 'null'
+    if isinstance(v, bool):
+        return 'true' if v else 'false'
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, str):
+        return _yaml_quote_str(v)
+    if isinstance(v, list) and not v:
+        return '[]'
+    if isinstance(v, dict) and not v:
+        return '{}'
+    raise TypeError(f"unsupported YAML scalar type: {type(v).__name__!r}")
+
+
+def _yaml_emit_lines(obj: object, indent: int) -> list[str]:
+    pad = '  ' * indent
+    if isinstance(obj, dict):
+        lines: list[str] = []
+        for k, v in obj.items():
+            if isinstance(v, dict) and v:
+                lines.append(f'{pad}{k}:')
+                lines.extend(_yaml_emit_lines(v, indent + 1))
+            elif isinstance(v, list) and v:
+                lines.append(f'{pad}{k}:')
+                lines.extend(_yaml_emit_lines(v, indent + 1))
+            else:
+                lines.append(f'{pad}{k}: {_yaml_scalar_repr(v)}')
+        return lines
+    if isinstance(obj, list):
+        lines = []
+        for item in obj:
+            if isinstance(item, dict) and item:
+                keys = list(item.keys())
+                fk, fv = keys[0], item[keys[0]]
+                if isinstance(fv, (dict, list)) and fv:
+                    lines.append(f'{pad}- {fk}:')
+                    lines.extend(_yaml_emit_lines(fv, indent + 2))
+                else:
+                    lines.append(f'{pad}- {fk}: {_yaml_scalar_repr(fv)}')
+                subpad = '  ' * (indent + 1)
+                for k in keys[1:]:
+                    v = item[k]
+                    if isinstance(v, (dict, list)) and v:
+                        lines.append(f'{subpad}{k}:')
+                        lines.extend(_yaml_emit_lines(v, indent + 2))
+                    else:
+                        lines.append(f'{subpad}{k}: {_yaml_scalar_repr(v)}')
+            else:
+                lines.append(f'{pad}- {_yaml_scalar_repr(item)}')
+        return lines
+    return [f'{pad}{_yaml_scalar_repr(obj)}']
+
+
+def _yaml_dumps(obj: object) -> str:
+    """Serialize Python objects to a YAML string."""
+    return '\n'.join(_yaml_emit_lines(obj, 0)) + '\n'
 
 
 # ---------------------------------------------------------------------------
@@ -56,27 +357,41 @@ def find_review_files(root: str) -> list[str]:
 
 def load_review(path: str) -> dict:
     """Load and return parsed data from a review sidecar file (YAML or JSON)."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8", newline='') as f:
         if path.endswith(".review.yaml"):
-            return yaml.safe_load(f) or {}
-        return json.load(f)
+            # Use newline='' to suppress universal-newlines translation so that a
+            # lone \r inside a YAML scalar (e.g. selected_text: '## Skills\r')
+            # is preserved rather than being silently converted to \n, which
+            # would split a single-quoted value across two lines and corrupt parsing.
+            data = _yaml_loads(f.read().replace('\r\n', '\n')) or {}
+        else:
+            data = json.load(f)
+    version = data.get("mrsf_version")
+    if version is None:
+        print(f"warning: {path}: missing mrsf_version (expected '1.0')", file=sys.stderr)
+    elif not str(version).startswith("1."):
+        print(f"warning: {path}: unsupported mrsf_version {version!r}", file=sys.stderr)
+    return data
 
 
 def save_review(path: str, data: dict) -> None:
-    """Atomically write *data* as YAML to *path*.
+    """Atomically write *data* as YAML to *path*, injecting MRSF envelope fields if absent.
 
-    If *path* ends with ``.review.json``, it is rewritten to
-    ``.review.yaml`` so all output uses MRSF v1.0 YAML format.
-    Uses a temporary file in the same directory followed by ``os.replace``
-    so the write is atomic on both Windows and POSIX.
+    Rewrites .review.json paths to .review.yaml.
     """
     if path.endswith(".review.json"):
         path = path[:-len(".review.json")] + ".review.yaml"
+    if "mrsf_version" not in data:
+        data = {"mrsf_version": "1.0", **data}
+    if "document" not in data:
+        base = os.path.basename(path)
+        if base.endswith(".review.yaml"):
+            data = {**data, "document": base[:-len(".review.yaml")]}
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            f.write(_yaml_dumps(data))
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -117,11 +432,11 @@ def cmd_read(args: argparse.Namespace) -> int:
     for fpath in files:
         try:
             data = load_review(fpath)
-        except (json.JSONDecodeError, yaml.YAMLError, OSError) as exc:
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
             print(f"warning: skipping {fpath}: {exc}", file=sys.stderr)
             continue
 
-        comments = data.get("comments", [])
+        comments = list(data.get("comments") or [])
         if not show_all:
             comments = [c for c in comments if not c.get("resolved", False)]
         if not comments:
@@ -142,7 +457,7 @@ def cmd_read(args: argparse.Namespace) -> int:
         for entry in output_entries:
             n = len(entry["comments"])
             label = "comments" if show_all else "unresolved comments"
-            print(f"\u2500\u2500 {entry['sourceFile']} ({n} {label}) \u2500\u2500")
+            print(f"-- {entry['sourceFile']} ({n} {label}) --")
             for c in entry["comments"]:
                 line = c.get("line", "?")
                 prefix = ""
@@ -169,11 +484,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     for fpath in files:
         try:
             data = load_review(fpath)
-        except (json.JSONDecodeError, yaml.YAMLError, OSError) as exc:
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
             print(f"warning: skipping {fpath}: {exc}", file=sys.stderr)
             continue
 
-        comments = data.get("comments", [])
+        comments = list(data.get("comments") or [])
         if not comments:
             continue
         if all(c.get("resolved", False) for c in comments):
@@ -191,11 +506,76 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# resolve / respond
+# ---------------------------------------------------------------------------
+
+def _add_response(data: dict, comment_id: str, response_text: str | None,
+                  resolve: bool) -> bool:
+    """Mutate *data* in place. Returns True if the comment was found."""
+    for c in data.get("comments", []):
+        if str(c.get("id")) == comment_id:
+            if resolve:
+                c["resolved"] = True
+            if response_text:
+                responses = list(c.get("responses") or [])
+                responses.append({
+                    "author": "agent",
+                    "text": response_text,
+                    "timestamp": iso_now(),
+                })
+                c["responses"] = responses
+            return True
+    return False
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    review_path = args.review_file
+    comment_id = str(args.comment_id)
+
+    try:
+        data = load_review(review_path)
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        print(f"error: cannot read {review_path}: {exc}", file=sys.stderr)
+        return 1
+
+    if not _add_response(data, comment_id, args.response, resolve=True):
+        print(f"error: comment {comment_id!r} not found in {review_path}", file=sys.stderr)
+        return 1
+
+    save_review(review_path, data)
+    print(f"Resolved comment {comment_id} in {os.path.basename(review_path)}")
+    return 0
+
+
+def cmd_respond(args: argparse.Namespace) -> int:
+    review_path = args.review_file
+    comment_id = str(args.comment_id)
+
+    try:
+        data = load_review(review_path)
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        print(f"error: cannot read {review_path}: {exc}", file=sys.stderr)
+        return 1
+
+    if not _add_response(data, comment_id, args.response, resolve=False):
+        print(f"error: comment {comment_id!r} not found in {review_path}", file=sys.stderr)
+        return 1
+
+    save_review(review_path, data)
+    print(f"Added response to comment {comment_id} in {os.path.basename(review_path)}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # open
 # ---------------------------------------------------------------------------
 
 # Well-known install locations per platform
 _KNOWN_PATHS_WINDOWS = [
+    os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "mdownreview", "mdownreview.exe",
+    ),
     os.path.join(
         os.environ.get("LOCALAPPDATA", ""),
         "Programs", "mdownreview", "mdownreview.exe",
@@ -240,54 +620,14 @@ def find_app_binary() -> str | None:
     return None
 
 
-def install_app() -> str | None:
-    """Download and install mdownreview using the official install scripts.
-
-    Returns the binary path on success, or ``None`` on failure.
-    """
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            print("Installing mdownreview (macOS)…")
-            subprocess.run(
-                ["sh", "-c", f"curl -LsSf {_INSTALL_URL_BASE}/install.sh | sh"],
-                check=True,
-            )
-        elif system == "Windows":
-            print("Installing mdownreview (Windows)…")
-            subprocess.run(
-                [
-                    "powershell", "-ExecutionPolicy", "ByPass", "-c",
-                    f"irm {_INSTALL_URL_BASE}/install.ps1 | iex",
-                ],
-                check=True,
-            )
-        else:
-            print(f"error: automatic install not supported on {system}", file=sys.stderr)
-            return None
-    except subprocess.CalledProcessError as exc:
-        print(f"error: install failed: {exc}", file=sys.stderr)
-        return None
-
-    return find_app_binary()
-
-
 def cmd_open(args: argparse.Namespace) -> int:
     folder = os.path.abspath(args.folder or os.getcwd())
     file_path = args.file
     binary = find_app_binary()
 
     if binary is None:
-        print("mdownreview not found — attempting install…", file=sys.stderr)
-        binary = install_app()
-
-    if binary is None:
-        print("error: mdownreview could not be installed", file=sys.stderr)
         print(
-            f"Install manually:\n"
-            f"  macOS:   curl -LsSf {_INSTALL_URL_BASE}/install.sh | sh\n"
-            f"  Windows: powershell -ExecutionPolicy ByPass -c "
-            f"\"irm {_INSTALL_URL_BASE}/install.ps1 | iex\"",
+            f"mdownreview not found — download and install from: {_INSTALL_URL_BASE}/",
             file=sys.stderr,
         )
         return 1
@@ -351,6 +691,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("path", nargs="?", default=None, help="Root directory (default: cwd)")
     p_clean.add_argument("--dry-run", action="store_true", help="Preview without deleting")
     p_clean.set_defaults(func=cmd_cleanup)
+
+    # resolve
+    p_resolve = sub.add_parser("resolve", help="Mark a comment as resolved")
+    p_resolve.add_argument("review_file", help="Path to the .review.yaml file")
+    p_resolve.add_argument("comment_id", help="Comment ID to resolve")
+    p_resolve.add_argument("--response", default=None, help="Response message to record")
+    p_resolve.set_defaults(func=cmd_resolve)
+
+    # respond
+    p_respond = sub.add_parser("respond", help="Add a response to a comment without resolving")
+    p_respond.add_argument("review_file", help="Path to the .review.yaml file")
+    p_respond.add_argument("comment_id", help="Comment ID to respond to")
+    p_respond.add_argument("--response", required=True, help="Response message to record")
+    p_respond.set_defaults(func=cmd_respond)
 
     return parser
 

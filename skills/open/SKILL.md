@@ -1,36 +1,22 @@
 ---
 name: open
-description: "Use to open the mdownreview desktop app on the current project folder for visual review of comments"
+description: "Use to open the mdownreview desktop app so the human can visually review source files. After the agent modifies files, pass the most recently changed source file via --file so the app opens directly to it."
 ---
 
 # Open mdownreview
 
-Find, install, and launch the mdownreview desktop app to visually review markdown review sidecar files (`.review.yaml`).
-
-## Usage
+Launch the mdownreview desktop app on the current project.
 
 ```bash
 python skills/mdownreview.py open [--folder path] [--file file]
 ```
 
-- `--folder`: project folder to open (default: current working directory)
-- `--file`: specific file to open within the project
-- If mdownreview is not installed, it will be installed automatically using the official install scripts
-- Launches in the background (does not block the agent)
-- Exit 0 on launch, exit 1 if app cannot be found or installed
+- `--folder`: project folder (default: cwd)
+- `--file`: source filename to jump to directly (e.g. `README.md`, not the `.review.yaml`)
+- Launches in background; exit 0 on success, exit 1 if app not found
 
-### Manual install
+## Picking --file
 
-macOS:
-```bash
-curl -LsSf https://dryotta.github.io/mdownreview/install.sh | sh
-```
+If you modified any text files in this session (source code, scripts, markdown, skill files, config — anything), pass the most recently changed one as `--file`. This opens the app directly to that file so the human can leave review comments on your changes. If no files were modified, omit `--file`.
 
-Windows:
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://dryotta.github.io/mdownreview/install.ps1 | iex"
-```
-
-## When to Use
-
-Use this skill when the user wants to visually review or browse comments in the mdownreview desktop app. The app provides a rich UI for reading comments alongside rendered markdown.
+If mdownreview is not installed, download it from: https://dryotta.github.io/mdownreview/

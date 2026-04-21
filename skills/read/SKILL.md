@@ -1,23 +1,16 @@
 ---
 name: read
-description: "Use when .review.yaml sidecar files exist alongside source files — reads unresolved review comments for the agent to address"
+description: "Use when .review.yaml sidecar files exist in the workspace — reads unresolved review comments for the agent to address. Trigger automatically whenever .review.yaml files are detected."
 ---
 
 # Read Review Comments
-
-Scan for markdown review sidecar files (`.review.yaml` and `.review.json`) and display outstanding review comments.
-
-## Usage
 
 ```bash
 python skills/mdownreview.py read [path] [--format json|text] [--all]
 ```
 
-- Default: scans current directory recursively, shows only unresolved comments
-- `--format json` for machine-parseable output
-- `--all` to include resolved comments
-- Each comment shows: id, file, line, anchor type, text, resolved status, responses
+- Scans current directory recursively; shows unresolved comments by default
+- `--format json` for machine-parseable output (use this when processing programmatically)
+- `--all` to include already-resolved comments
 
-## When to Use
-
-Use this skill when you see `.review.yaml` or `.review.json` files alongside source files in the workspace. These are markdown review sidecar files — each contains human review feedback on the corresponding source file.
+Each comment includes: id, file, line, type, text, resolved status.
