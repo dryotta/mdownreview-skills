@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""CLI for working with mDown reView sidecar files (MRSF v1.0, YAML format).
+"""CLI for working with mdownreview markdown review sidecar files (.review.yaml).
 
 Reads both .review.yaml (preferred) and .review.json (legacy) sidecar files.
 All writes use MRSF v1.0 envelope and YAML output.
 
 Subcommands:
+  open     — find, install, and launch the mdownreview desktop app
   read     — show review comments from sidecar files
-  respond  — add a reply to a comment (flat reply_to threading)
-  resolve  — mark comments as resolved
   cleanup  — delete fully-resolved sidecar files
-  open     — find and launch the mDown reView desktop app
 """
 
 import argparse
 import datetime
-import hashlib
 import json
 import os
 import platform
@@ -22,7 +19,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import uuid
 from pathlib import Path
 
 import yaml
@@ -160,105 +156,6 @@ def cmd_read(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# respond
-# ---------------------------------------------------------------------------
-
-def cmd_respond(args: argparse.Namespace) -> int:
-    fpath = args.file
-    comment_id = args.comment_id
-    text = args.text
-
-    if not os.path.isfile(fpath):
-        print(f"error: file not found: {fpath}", file=sys.stderr)
-        return 1
-
-    data = load_review(fpath)
-    comments = data.get("comments", [])
-
-    # Verify parent comment exists
-    if not any(c["id"] for c in comments if c.get("id") == comment_id):
-        print(f"error: comment '{comment_id}' not found in {fpath}", file=sys.stderr)
-        return 1
-
-    # Create a new reply comment with reply_to
-    reply = {
-        "id": str(uuid.uuid4()),
-        "author": "Agent (agent)",
-        "timestamp": iso_now(),
-        "text": text,
-        "resolved": False,
-        "reply_to": comment_id,
-    }
-    comments.append(reply)
-
-    # Ensure MRSF envelope
-    data["mrsf_version"] = "1.0"
-    if "document" not in data:
-        data["document"] = source_file_for(fpath)
-    data["comments"] = comments
-
-    save_review(fpath, data)
-    print(f"Replied to {comment_id} (new comment {reply['id']})")
-    return 0
-
-
-# ---------------------------------------------------------------------------
-# resolve
-# ---------------------------------------------------------------------------
-
-def cmd_resolve(args: argparse.Namespace) -> int:
-    fpath = args.file
-    resolve_all = args.all
-    comment_ids: list[str] = args.comment_ids or []
-
-    if not resolve_all and not comment_ids:
-        print("error: provide comment IDs or --all", file=sys.stderr)
-        return 1
-
-    if not os.path.isfile(fpath):
-        print(f"error: file not found: {fpath}", file=sys.stderr)
-        return 1
-
-    data = load_review(fpath)
-    comments = data.get("comments", [])
-
-    if resolve_all:
-        count = 0
-        for c in comments:
-            if not c.get("resolved", False):
-                c["resolved"] = True
-                count += 1
-        data["mrsf_version"] = "1.0"
-        if "document" not in data:
-            data["document"] = source_file_for(fpath)
-        save_review(fpath, data)
-        print(f"Resolved {count} comment(s)")
-        return 0
-
-    # Resolve specific IDs
-    ids_found: set[str] = set()
-    for c in comments:
-        if c["id"] in comment_ids:
-            c["resolved"] = True
-            ids_found.add(c["id"])
-
-    missing = set(comment_ids) - ids_found
-    if missing:
-        print(
-            f"error: comment(s) not found: {', '.join(sorted(missing))}",
-            file=sys.stderr,
-        )
-        return 1
-
-    data["mrsf_version"] = "1.0"
-    if "document" not in data:
-        data["document"] = source_file_for(fpath)
-    save_review(fpath, data)
-    print(f"Resolved {len(ids_found)} comment(s)")
-    return 0
-
-
-# ---------------------------------------------------------------------------
 # cleanup
 # ---------------------------------------------------------------------------
 
@@ -301,22 +198,24 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 _KNOWN_PATHS_WINDOWS = [
     os.path.join(
         os.environ.get("LOCALAPPDATA", ""),
-        "Programs", "mDown reView", "mDown reView.exe",
+        "Programs", "mdownreview", "mdownreview.exe",
     ),
 ]
 
 _KNOWN_PATHS_MACOS = [
-    "/Applications/mDown reView.app/Contents/MacOS/mDown reView",
+    "/Applications/mdownreview.app/Contents/MacOS/mdownreview",
     os.path.expanduser(
-        "~/Applications/mDown reView.app/Contents/MacOS/mDown reView"
+        "~/Applications/mdownreview.app/Contents/MacOS/mdownreview"
     ),
 ]
 
-_PATH_NAMES = ["mDown reView", "mdown-review"]
+_PATH_NAMES = ["mdownreview", "mdown-review"]
+
+_INSTALL_URL_BASE = "https://dryotta.github.io/mdownreview"
 
 
 def find_app_binary() -> str | None:
-    """Locate the mDown reView binary.
+    """Locate the mdownreview binary.
 
     Search order: well-known install paths, then PATH.
     Returns the absolute path or ``None``.
@@ -341,36 +240,73 @@ def find_app_binary() -> str | None:
     return None
 
 
+def install_app() -> str | None:
+    """Download and install mdownreview using the official install scripts.
+
+    Returns the binary path on success, or ``None`` on failure.
+    """
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            print("Installing mdownreview (macOS)…")
+            subprocess.run(
+                ["sh", "-c", f"curl -LsSf {_INSTALL_URL_BASE}/install.sh | sh"],
+                check=True,
+            )
+        elif system == "Windows":
+            print("Installing mdownreview (Windows)…")
+            subprocess.run(
+                [
+                    "powershell", "-ExecutionPolicy", "ByPass", "-c",
+                    f"irm {_INSTALL_URL_BASE}/install.ps1 | iex",
+                ],
+                check=True,
+            )
+        else:
+            print(f"error: automatic install not supported on {system}", file=sys.stderr)
+            return None
+    except subprocess.CalledProcessError as exc:
+        print(f"error: install failed: {exc}", file=sys.stderr)
+        return None
+
+    return find_app_binary()
+
+
 def cmd_open(args: argparse.Namespace) -> int:
-    target = os.path.abspath(args.path or os.getcwd())
+    folder = os.path.abspath(args.folder or os.getcwd())
+    file_path = args.file
     binary = find_app_binary()
 
     if binary is None:
-        searched = []
-        system = platform.system()
-        if system == "Windows":
-            searched.extend(_KNOWN_PATHS_WINDOWS)
-        elif system == "Darwin":
-            searched.extend(_KNOWN_PATHS_MACOS)
-        searched.extend(f"(PATH) {n}" for n in _PATH_NAMES)
-        print("error: mDown reView not found", file=sys.stderr)
-        print("Searched:", file=sys.stderr)
-        for loc in searched:
-            print(f"  - {loc}", file=sys.stderr)
+        print("mdownreview not found — attempting install…", file=sys.stderr)
+        binary = install_app()
+
+    if binary is None:
+        print("error: mdownreview could not be installed", file=sys.stderr)
+        print(
+            f"Install manually:\n"
+            f"  macOS:   curl -LsSf {_INSTALL_URL_BASE}/install.sh | sh\n"
+            f"  Windows: powershell -ExecutionPolicy ByPass -c "
+            f"\"irm {_INSTALL_URL_BASE}/install.ps1 | iex\"",
+            file=sys.stderr,
+        )
         return 1
+
+    cmd = [binary, "--folder", folder]
+    if file_path:
+        cmd.extend(["--file", file_path])
 
     try:
         if platform.system() == "Windows":
-            # DETACHED_PROCESS so the app doesn't block the terminal
             subprocess.Popen(
-                [binary, target],
+                cmd,
                 creationflags=subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
                 | subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
                 close_fds=True,
             )
         else:
             subprocess.Popen(
-                [binary, target],
+                cmd,
                 start_new_session=True,
                 close_fds=True,
             )
@@ -378,8 +314,11 @@ def cmd_open(args: argparse.Namespace) -> int:
         print(f"error: failed to launch: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Launched mDown reView: {binary}")
-    print(f"Opening: {target}")
+    print(f"Launched mdownreview: {binary}")
+    parts = [f"--folder {folder}"]
+    if file_path:
+        parts.append(f"--file {file_path}")
+    print(f"Opening: {' '.join(parts)}")
     return 0
 
 
@@ -390,9 +329,15 @@ def cmd_open(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdownreview",
-        description="Work with mDown reView sidecar files (MRSF v1.0, YAML format).",
+        description="Work with mdownreview markdown review sidecar files (.review.yaml).",
     )
     sub = parser.add_subparsers(dest="command")
+
+    # open
+    p_open = sub.add_parser("open", help="Launch mdownreview desktop app")
+    p_open.add_argument("--folder", default=None, help="Project folder to open (default: cwd)")
+    p_open.add_argument("--file", default=None, help="Specific file to open")
+    p_open.set_defaults(func=cmd_open)
 
     # read
     p_read = sub.add_parser("read", help="Show review comments")
@@ -401,30 +346,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_read.add_argument("--all", action="store_true", help="Include resolved comments")
     p_read.set_defaults(func=cmd_read)
 
-    # respond
-    p_resp = sub.add_parser("respond", help="Add a response to a comment")
-    p_resp.add_argument("file", help="Path to .review.yaml or .review.json file")
-    p_resp.add_argument("comment_id", help="Comment ID")
-    p_resp.add_argument("text", help="Response text")
-    p_resp.set_defaults(func=cmd_respond)
-
-    # resolve
-    p_res = sub.add_parser("resolve", help="Mark comments as resolved")
-    p_res.add_argument("file", help="Path to .review.yaml or .review.json file")
-    p_res.add_argument("comment_ids", nargs="*", help="Comment IDs to resolve")
-    p_res.add_argument("--all", action="store_true", help="Resolve all comments")
-    p_res.set_defaults(func=cmd_resolve)
-
     # cleanup
     p_clean = sub.add_parser("cleanup", help="Delete fully-resolved sidecar files")
     p_clean.add_argument("path", nargs="?", default=None, help="Root directory (default: cwd)")
     p_clean.add_argument("--dry-run", action="store_true", help="Preview without deleting")
     p_clean.set_defaults(func=cmd_cleanup)
-
-    # open
-    p_open = sub.add_parser("open", help="Launch mDown reView desktop app")
-    p_open.add_argument("path", nargs="?", default=None, help="Folder to open (default: cwd)")
-    p_open.set_defaults(func=cmd_open)
 
     return parser
 

@@ -1,11 +1,11 @@
 ---
 name: read
-description: "Use when .review.json sidecar files exist alongside source files — reads unresolved review comments for the agent to address"
+description: "Use when .review.yaml sidecar files exist alongside source files — reads unresolved review comments for the agent to address"
 ---
 
 # Read Review Comments
 
-Scan for `.review.json` sidecar files and display outstanding review comments.
+Scan for markdown review sidecar files (`.review.yaml` and `.review.json`) and display outstanding review comments.
 
 ## Usage
 
@@ -20,4 +20,4 @@ python skills/mdownreview.py read [path] [--format json|text] [--all]
 
 ## When to Use
 
-Use this skill when you see `.review.json` files alongside source files in the workspace. These are review comment sidecars — each contains human review feedback on the corresponding source file.
+Use this skill when you see `.review.yaml` or `.review.json` files alongside source files in the workspace. These are markdown review sidecar files — each contains human review feedback on the corresponding source file.

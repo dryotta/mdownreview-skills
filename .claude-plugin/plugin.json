@@ -1,7 +1,7 @@
 {
   "name": "mdownreview",
-  "description": "Skills for reading, responding to, resolving, and cleaning up .review.json sidecar comments",
-  "version": "0.3.0",
+  "description": "Skills for reading, reviewing, and cleaning up markdown review sidecar files (.review.yaml)",
+  "version": "0.4.0",
   "author": {
     "name": "dryotta"
   },

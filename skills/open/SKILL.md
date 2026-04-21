@@ -1,23 +1,36 @@
 ---
 name: open
-description: "Use to open the mDown reView desktop app on the current project folder for visual review of comments"
+description: "Use to open the mdownreview desktop app on the current project folder for visual review of comments"
 ---
 
-# Open mDown reView
+# Open mdownreview
 
-Find and launch the mDown reView desktop app to visually review `.review.json` sidecar comments.
+Find, install, and launch the mdownreview desktop app to visually review markdown review sidecar files (`.review.yaml`).
 
 ## Usage
 
 ```bash
-python skills/mdownreview.py open [path]
+python skills/mdownreview.py open [--folder path] [--file file]
 ```
 
-- Default: opens the current working directory
-- Searches common install locations, then falls back to PATH
+- `--folder`: project folder to open (default: current working directory)
+- `--file`: specific file to open within the project
+- If mdownreview is not installed, it will be installed automatically using the official install scripts
 - Launches in the background (does not block the agent)
-- Exit 0 on launch, exit 1 if app not found (lists searched locations)
+- Exit 0 on launch, exit 1 if app cannot be found or installed
+
+### Manual install
+
+macOS:
+```bash
+curl -LsSf https://dryotta.github.io/mdownreview/install.sh | sh
+```
+
+Windows:
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://dryotta.github.io/mdownreview/install.ps1 | iex"
+```
 
 ## When to Use
 
-Use this skill when the user wants to visually review or browse comments in the mDown reView desktop app. The app provides a rich UI for reading comments alongside rendered markdown.
+Use this skill when the user wants to visually review or browse comments in the mdownreview desktop app. The app provides a rich UI for reading comments alongside rendered markdown.

@@ -1,6 +1,8 @@
 # mdownreview-skills
 
-Agent skills for working with `.review.json` sidecar comments from [mDown reView](https://github.com/dryotta/mDown-reView).
+Agent skills for working with markdown review sidecar files (`.review.yaml`) from [mdownreview](https://github.com/dryotta/mdownreview).
+
+Both `.review.yaml` (preferred) and `.review.json` (legacy) formats are supported.
 
 ## Install
 
@@ -13,21 +15,17 @@ Agent skills for working with `.review.json` sidecar comments from [mDown reView
 
 | Skill | Description |
 |-------|-------------|
-| `read` | Scan for `.review.json` files and list unresolved comments |
-| `respond` | Record an agent response after addressing a comment |
-| `resolve` | Mark comments as resolved |
-| `cleanup` | Delete `.review.json` files where all comments are resolved |
-| `review` | Orchestrate the full cycle: read, fix, respond, resolve, clean up |
-| `open` | Find and launch the mDown reView desktop app |
+| `open` | Find, install, and launch the mdownreview desktop app |
+| `read` | Scan for markdown review sidecar files and list unresolved comments |
+| `review` | Orchestrate the full cycle: read, fix, and clean up |
+| `cleanup` | Delete sidecar files where all comments are resolved |
 
 ## CLI
 
 ```bash
+python skills/mdownreview.py open [--folder path] [--file file]
 python skills/mdownreview.py read [path] [--format json|text] [--all]
-python skills/mdownreview.py respond <file> <comment-id> "<text>"
-python skills/mdownreview.py resolve <file> <comment-id> [--all]
 python skills/mdownreview.py cleanup [path] [--dry-run]
-python skills/mdownreview.py open [path]
 ```
 
 ## License

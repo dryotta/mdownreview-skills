@@ -1,11 +1,11 @@
 ---
 name: cleanup
-description: "Use to clean up .review.json sidecar files after all review comments have been resolved"
+description: "Use to clean up markdown review sidecar files after all review comments have been resolved"
 ---
 
 # Clean Up Resolved Review Files
 
-Delete `.review.json` sidecar files where every comment has been resolved.
+Delete markdown review sidecar files (`.review.yaml` and `.review.json`) where every comment has been resolved.
 
 ## Usage
 

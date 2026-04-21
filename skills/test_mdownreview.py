@@ -173,153 +173,6 @@ class TestReadJson(TempDirMixin, unittest.TestCase):
         self.assertIn("sub", data[0]["reviewFile"])
 
 
-# ===== respond =====
-
-class TestRespond(TempDirMixin, unittest.TestCase):
-
-    def test_adds_response(self):
-        fpath = self.write_review("app.tsx.review.json", make_review([
-            make_comment("c1", "Fix this"),
-        ]))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        rc = mdownreview.main(["respond", fpath, "c1", "Done"])
-        sys.stdout = old_stdout
-        self.assertEqual(rc, 0)
-        data = self.read_review(fpath)
-        resps = data["comments"][0]["responses"]
-        self.assertEqual(len(resps), 1)
-        self.assertEqual(resps[0]["author"], "agent")
-        self.assertEqual(resps[0]["text"], "Done")
-        self.assertIn("createdAt", resps[0])
-
-    def test_preserves_version(self):
-        fpath = self.write_review("a.md.review.json", make_review(
-            [make_comment("c1", "Fix")], version=2
-        ))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        mdownreview.main(["respond", fpath, "c1", "OK"])
-        sys.stdout = old_stdout
-        data = self.read_review(fpath)
-        self.assertEqual(data["version"], 2)
-
-    def test_unknown_id_fails(self):
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix"),
-        ]))
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-        rc = mdownreview.main(["respond", fpath, "nonexistent", "text"])
-        sys.stdout, sys.stderr = old_stdout, old_stderr
-        self.assertEqual(rc, 1)
-
-    def test_appends_to_existing_responses(self):
-        existing = [{"author": "human", "text": "Hmm", "createdAt": "2026-01-01T00:00:00.000Z"}]
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix", responses=existing),
-        ]))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        mdownreview.main(["respond", fpath, "c1", "Done"])
-        sys.stdout = old_stdout
-        data = self.read_review(fpath)
-        resps = data["comments"][0]["responses"]
-        self.assertEqual(len(resps), 2)
-        self.assertEqual(resps[0]["author"], "human")
-        self.assertEqual(resps[1]["author"], "agent")
-
-    def test_missing_file_fails(self):
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-        rc = mdownreview.main(["respond", os.path.join(self.tmpdir, "nope.review.json"), "c1", "x"])
-        sys.stdout, sys.stderr = old_stdout, old_stderr
-        self.assertEqual(rc, 1)
-
-
-# ===== resolve =====
-
-class TestResolve(TempDirMixin, unittest.TestCase):
-
-    def test_single_comment(self):
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix"),
-            make_comment("c2", "Also fix"),
-        ]))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        rc = mdownreview.main(["resolve", fpath, "c1"])
-        sys.stdout = old_stdout
-        self.assertEqual(rc, 0)
-        data = self.read_review(fpath)
-        self.assertTrue(data["comments"][0]["resolved"])
-        self.assertFalse(data["comments"][1]["resolved"])
-
-    def test_multiple_comments(self):
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix"),
-            make_comment("c2", "Also"),
-            make_comment("c3", "And this"),
-        ]))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        rc = mdownreview.main(["resolve", fpath, "c1", "c3"])
-        sys.stdout = old_stdout
-        self.assertEqual(rc, 0)
-        data = self.read_review(fpath)
-        self.assertTrue(data["comments"][0]["resolved"])
-        self.assertFalse(data["comments"][1]["resolved"])
-        self.assertTrue(data["comments"][2]["resolved"])
-
-    def test_all_flag(self):
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix"),
-            make_comment("c2", "Also"),
-        ]))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        rc = mdownreview.main(["resolve", fpath, "--all"])
-        sys.stdout = old_stdout
-        self.assertEqual(rc, 0)
-        data = self.read_review(fpath)
-        self.assertTrue(all(c["resolved"] for c in data["comments"]))
-
-    def test_unknown_id_fails(self):
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix"),
-        ]))
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-        rc = mdownreview.main(["resolve", fpath, "nonexistent"])
-        sys.stdout, sys.stderr = old_stdout, old_stderr
-        self.assertEqual(rc, 1)
-
-    def test_preserves_version(self):
-        fpath = self.write_review("a.md.review.json", make_review(
-            [make_comment("c1", "Fix")], version=1
-        ))
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
-        mdownreview.main(["resolve", fpath, "c1"])
-        sys.stdout = old_stdout
-        data = self.read_review(fpath)
-        self.assertEqual(data["version"], 1)
-
-    def test_no_ids_no_all_fails(self):
-        fpath = self.write_review("a.md.review.json", make_review([
-            make_comment("c1", "Fix"),
-        ]))
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = StringIO()
-        sys.stderr = StringIO()
-        rc = mdownreview.main(["resolve", fpath])
-        sys.stdout, sys.stderr = old_stdout, old_stderr
-        self.assertEqual(rc, 1)
-
-
 # ===== cleanup =====
 
 class TestCleanup(TempDirMixin, unittest.TestCase):
@@ -387,6 +240,7 @@ class TestHelpers(unittest.TestCase):
     def test_source_file_for(self):
         self.assertEqual(mdownreview.source_file_for("app.tsx.review.json"), "app.tsx")
         self.assertEqual(mdownreview.source_file_for("readme.md.review.json"), "readme.md")
+        self.assertEqual(mdownreview.source_file_for("app.tsx.review.yaml"), "app.tsx")
 
     def test_iso_now_format(self):
         ts = mdownreview.iso_now()
@@ -412,7 +266,6 @@ class TestOpen(unittest.TestCase):
             mock_which.side_effect = lambda name: (
                 "/usr/bin/mdown-review" if name == "mdown-review" else None
             )
-            # Patch known paths to not exist
             with unittest.mock.patch("os.path.isfile", return_value=False):
                 result = mdownreview.find_app_binary()
         self.assertEqual(result, "/usr/bin/mdown-review")
@@ -424,30 +277,46 @@ class TestOpen(unittest.TestCase):
                 result = mdownreview.find_app_binary()
         self.assertIsNone(result)
 
-    def test_open_not_found(self):
-        """cmd_open exits 1 when binary not found."""
+    def test_open_not_found_install_fails(self):
+        """cmd_open exits 1 when binary not found and install fails."""
         with unittest.mock.patch.object(mdownreview, "find_app_binary", return_value=None):
-            old_stdout, old_stderr = sys.stdout, sys.stderr
-            sys.stdout = StringIO()
-            sys.stderr = buf_err = StringIO()
-            rc = mdownreview.main(["open"])
-            sys.stdout, sys.stderr = old_stdout, old_stderr
+            with unittest.mock.patch.object(mdownreview, "install_app", return_value=None):
+                old_stdout, old_stderr = sys.stdout, sys.stderr
+                sys.stdout = StringIO()
+                sys.stderr = buf_err = StringIO()
+                rc = mdownreview.main(["open"])
+                sys.stdout, sys.stderr = old_stdout, old_stderr
         self.assertEqual(rc, 1)
-        self.assertIn("not found", buf_err.getvalue())
+        self.assertIn("could not be installed", buf_err.getvalue())
 
-    def test_open_launches_app(self):
-        """cmd_open launches the binary and exits 0."""
+    def test_open_launches_app_with_folder(self):
+        """cmd_open launches the binary with --folder and exits 0."""
         with unittest.mock.patch.object(mdownreview, "find_app_binary", return_value="/fake/app"):
             with unittest.mock.patch("subprocess.Popen") as mock_popen:
                 old_stdout = sys.stdout
                 sys.stdout = buf = StringIO()
-                rc = mdownreview.main(["open", "/some/project"])
+                rc = mdownreview.main(["open", "--folder", "/some/project"])
                 sys.stdout = old_stdout
         self.assertEqual(rc, 0)
         mock_popen.assert_called_once()
-        call_args = mock_popen.call_args
-        self.assertEqual(call_args[0][0][0], "/fake/app")
+        call_args = mock_popen.call_args[0][0]
+        self.assertEqual(call_args[0], "/fake/app")
+        self.assertIn("--folder", call_args)
         self.assertIn("Launched", buf.getvalue())
+
+    def test_open_launches_app_with_folder_and_file(self):
+        """cmd_open launches with both --folder and --file."""
+        with unittest.mock.patch.object(mdownreview, "find_app_binary", return_value="/fake/app"):
+            with unittest.mock.patch("subprocess.Popen") as mock_popen:
+                old_stdout = sys.stdout
+                sys.stdout = buf = StringIO()
+                rc = mdownreview.main(["open", "--folder", "/proj", "--file", "src/main.py"])
+                sys.stdout = old_stdout
+        self.assertEqual(rc, 0)
+        call_args = mock_popen.call_args[0][0]
+        self.assertIn("--folder", call_args)
+        self.assertIn("--file", call_args)
+        self.assertIn("src/main.py", call_args)
 
     def test_open_launch_failure(self):
         """cmd_open exits 1 when Popen raises OSError."""
@@ -456,10 +325,30 @@ class TestOpen(unittest.TestCase):
                 old_stdout, old_stderr = sys.stdout, sys.stderr
                 sys.stdout = StringIO()
                 sys.stderr = buf_err = StringIO()
-                rc = mdownreview.main(["open", "/some/project"])
+                rc = mdownreview.main(["open", "--folder", "/some/project"])
                 sys.stdout, sys.stderr = old_stdout, old_stderr
         self.assertEqual(rc, 1)
         self.assertIn("failed to launch", buf_err.getvalue())
+
+    def test_open_auto_installs_when_not_found(self):
+        """cmd_open tries install_app when find_app_binary returns None."""
+        call_count = [0]
+
+        def find_side_effect():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return None  # first call: not found
+            return "/installed/app"  # after install
+
+        with unittest.mock.patch.object(mdownreview, "find_app_binary", side_effect=find_side_effect):
+            with unittest.mock.patch.object(mdownreview, "install_app", return_value="/installed/app"):
+                with unittest.mock.patch("subprocess.Popen"):
+                    old_stdout, old_stderr = sys.stdout, sys.stderr
+                    sys.stdout = StringIO()
+                    sys.stderr = StringIO()
+                    rc = mdownreview.main(["open"])
+                    sys.stdout, sys.stderr = old_stdout, old_stderr
+        self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":

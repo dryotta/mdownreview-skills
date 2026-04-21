@@ -4,7 +4,7 @@
     "name": "dryotta"
   },
   "metadata": {
-    "description": "Skills for working with .review.json sidecar comments",
+    "description": "Skills for working with markdown review sidecar files (.review.yaml)",
     "version": "1.0.0"
   },
   "plugins": [
@@ -14,8 +14,8 @@
         "source": "url",
         "url": "https://github.com/dryotta/mdownreview-skills.git"
       },
-      "description": "Read, respond to, resolve, and clean up .review.json sidecar comments",
-      "version": "0.3.0",
+      "description": "Read, review, and clean up markdown review sidecar files (.review.yaml)",
+      "version": "0.4.0",
       "strict": true
     }
   ]
