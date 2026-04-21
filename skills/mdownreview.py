@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""CLI for working with mDown reView .review.json sidecar files.
+"""CLI for working with mDown reView sidecar files (MRSF v1.0, YAML format).
+
+Reads both .review.yaml (preferred) and .review.json (legacy) sidecar files.
+All writes use MRSF v1.0 envelope and YAML output.
 
 Subcommands:
   read     — show review comments from sidecar files
-  respond  — add a response to a comment
+  respond  — add a reply to a comment (flat reply_to threading)
   resolve  — mark comments as resolved
   cleanup  — delete fully-resolved sidecar files
   open     — find and launch the mDown reView desktop app
@@ -11,6 +14,7 @@ Subcommands:
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import platform
@@ -18,7 +22,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
+
+import yaml
 
 
 # ---------------------------------------------------------------------------
@@ -26,37 +33,56 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def find_review_files(root: str) -> list[str]:
-    """Recursively find all *.review.json files under *root*."""
+    """Recursively find all *.review.yaml and *.review.json files under *root*.
+
+    YAML takes priority: if both extensions exist for the same source file,
+    only the .review.yaml path is returned.
+    """
+    yaml_set: set[str] = set()
     results: list[str] = []
+    # First pass: collect YAML files
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for fn in sorted(filenames):
+            if fn.endswith(".review.yaml"):
+                full = os.path.join(dirpath, fn)
+                results.append(full)
+                yaml_set.add(os.path.join(dirpath, fn[:-len(".review.yaml")]))
+    # Second pass: collect JSON files only if no YAML counterpart
     for dirpath, _dirnames, filenames in os.walk(root):
         for fn in sorted(filenames):
             if fn.endswith(".review.json"):
-                results.append(os.path.join(dirpath, fn))
+                base_key = os.path.join(dirpath, fn[:-len(".review.json")])
+                if base_key not in yaml_set:
+                    results.append(os.path.join(dirpath, fn))
     results.sort()
     return results
 
 
 def load_review(path: str) -> dict:
-    """Load and return parsed JSON from a review sidecar file."""
+    """Load and return parsed data from a review sidecar file (YAML or JSON)."""
     with open(path, "r", encoding="utf-8") as f:
+        if path.endswith(".review.yaml"):
+            return yaml.safe_load(f) or {}
         return json.load(f)
 
 
 def save_review(path: str, data: dict) -> None:
-    """Atomically write *data* as JSON to *path*.
+    """Atomically write *data* as YAML to *path*.
 
+    If *path* ends with ``.review.json``, it is rewritten to
+    ``.review.yaml`` so all output uses MRSF v1.0 YAML format.
     Uses a temporary file in the same directory followed by ``os.replace``
     so the write is atomic on both Windows and POSIX.
     """
+    if path.endswith(".review.json"):
+        path = path[:-len(".review.json")] + ".review.yaml"
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
         os.replace(tmp, path)
     except BaseException:
-        # Clean up the temp file on any failure
         try:
             os.unlink(tmp)
         except OSError:
@@ -65,10 +91,11 @@ def save_review(path: str, data: dict) -> None:
 
 
 def source_file_for(review_path: str) -> str:
-    """Derive the source filename by stripping ``.review.json``."""
+    """Derive the source filename by stripping the review suffix."""
     base = os.path.basename(review_path)
-    if base.endswith(".review.json"):
-        return base[: -len(".review.json")]
+    for suffix in (".review.yaml", ".review.json"):
+        if base.endswith(suffix):
+            return base[:-len(suffix)]
     return base
 
 
@@ -94,7 +121,7 @@ def cmd_read(args: argparse.Namespace) -> int:
     for fpath in files:
         try:
             data = load_review(fpath)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, yaml.YAMLError, OSError) as exc:
             print(f"warning: skipping {fpath}: {exc}", file=sys.stderr)
             continue
 
@@ -121,8 +148,13 @@ def cmd_read(args: argparse.Namespace) -> int:
             label = "comments" if show_all else "unresolved comments"
             print(f"\u2500\u2500 {entry['sourceFile']} ({n} {label}) \u2500\u2500")
             for c in entry["comments"]:
-                line = c.get("lineNumber", "?")
-                print(f"  [{c['id']}] line {line}: {c['text']}")
+                line = c.get("line", "?")
+                prefix = ""
+                if c.get("type"):
+                    prefix += f"[{c['type']}] "
+                if c.get("severity"):
+                    prefix += f"({c['severity']}) "
+                print(f"  [{c['id']}] line {line}: {prefix}{c['text']}")
 
     return 0
 
@@ -141,27 +173,32 @@ def cmd_respond(args: argparse.Namespace) -> int:
         return 1
 
     data = load_review(fpath)
-    version = data.get("version", 3)
+    comments = data.get("comments", [])
 
-    found = False
-    for c in data.get("comments", []):
-        if c["id"] == comment_id:
-            responses = c.setdefault("responses", [])
-            responses.append({
-                "author": "agent",
-                "text": text,
-                "createdAt": iso_now(),
-            })
-            found = True
-            break
-
-    if not found:
+    # Verify parent comment exists
+    if not any(c["id"] for c in comments if c.get("id") == comment_id):
         print(f"error: comment '{comment_id}' not found in {fpath}", file=sys.stderr)
         return 1
 
-    data["version"] = version
+    # Create a new reply comment with reply_to
+    reply = {
+        "id": str(uuid.uuid4()),
+        "author": "Agent (agent)",
+        "timestamp": iso_now(),
+        "text": text,
+        "resolved": False,
+        "reply_to": comment_id,
+    }
+    comments.append(reply)
+
+    # Ensure MRSF envelope
+    data["mrsf_version"] = "1.0"
+    if "document" not in data:
+        data["document"] = source_file_for(fpath)
+    data["comments"] = comments
+
     save_review(fpath, data)
-    print(f"Responded to {comment_id}")
+    print(f"Replied to {comment_id} (new comment {reply['id']})")
     return 0
 
 
@@ -183,7 +220,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         return 1
 
     data = load_review(fpath)
-    version = data.get("version", 3)
     comments = data.get("comments", [])
 
     if resolve_all:
@@ -192,7 +228,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             if not c.get("resolved", False):
                 c["resolved"] = True
                 count += 1
-        data["version"] = version
+        data["mrsf_version"] = "1.0"
+        if "document" not in data:
+            data["document"] = source_file_for(fpath)
         save_review(fpath, data)
         print(f"Resolved {count} comment(s)")
         return 0
@@ -212,7 +250,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         )
         return 1
 
-    data["version"] = version
+    data["mrsf_version"] = "1.0"
+    if "document" not in data:
+        data["document"] = source_file_for(fpath)
     save_review(fpath, data)
     print(f"Resolved {len(ids_found)} comment(s)")
     return 0
@@ -232,7 +272,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     for fpath in files:
         try:
             data = load_review(fpath)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, yaml.YAMLError, OSError) as exc:
             print(f"warning: skipping {fpath}: {exc}", file=sys.stderr)
             continue
 
@@ -350,7 +390,7 @@ def cmd_open(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdownreview",
-        description="Work with mDown reView .review.json sidecar files.",
+        description="Work with mDown reView sidecar files (MRSF v1.0, YAML format).",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -363,14 +403,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # respond
     p_resp = sub.add_parser("respond", help="Add a response to a comment")
-    p_resp.add_argument("file", help="Path to .review.json file")
+    p_resp.add_argument("file", help="Path to .review.yaml or .review.json file")
     p_resp.add_argument("comment_id", help="Comment ID")
     p_resp.add_argument("text", help="Response text")
     p_resp.set_defaults(func=cmd_respond)
 
     # resolve
     p_res = sub.add_parser("resolve", help="Mark comments as resolved")
-    p_res.add_argument("file", help="Path to .review.json file")
+    p_res.add_argument("file", help="Path to .review.yaml or .review.json file")
     p_res.add_argument("comment_ids", nargs="*", help="Comment IDs to resolve")
     p_res.add_argument("--all", action="store_true", help="Resolve all comments")
     p_res.set_defaults(func=cmd_resolve)
