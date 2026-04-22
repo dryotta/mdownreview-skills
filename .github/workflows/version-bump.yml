@@ -1,0 +1,63 @@
+name: Version Bump
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine bump type from commit message
+        id: bump-type
+        run: |
+          MSG="${{ github.event.head_commit.message }}"
+          # BREAKING CHANGE in footer or ! suffix → major
+          if echo "$MSG" | grep -qE "^[a-z]+(\(.*\))?!:" || echo "$MSG" | grep -q "BREAKING CHANGE"; then
+            echo "bump=major" >> "$GITHUB_OUTPUT"
+          # feat → minor
+          elif echo "$MSG" | grep -qE "^feat(\(.*\))?:"; then
+            echo "bump=minor" >> "$GITHUB_OUTPUT"
+          # everything else (fix, refactor, perf, chore, docs, …) → patch
+          else
+            echo "bump=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute new version
+        id: version
+        run: |
+          CURRENT=$(jq -r '.version' .claude-plugin/plugin.json)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "${{ steps.bump-type.outputs.bump }}" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+          NEW="$MAJOR.$MINOR.$PATCH"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW"         >> "$GITHUB_OUTPUT"
+
+      - name: Update plugin.json and marketplace.json
+        run: |
+          NEW="${{ steps.version.outputs.new }}"
+          jq ".version = \"$NEW\"" .claude-plugin/plugin.json > _tmp.json \
+            && mv _tmp.json .claude-plugin/plugin.json
+          jq ".plugins[0].version = \"$NEW\"" .claude-plugin/marketplace.json > _tmp.json \
+            && mv _tmp.json .claude-plugin/marketplace.json
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
+          git commit -m "chore: bump version ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.new }}"
+          git push
