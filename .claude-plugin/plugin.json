@@ -1,7 +1,7 @@
 {
   "name": "mdownreview",
   "description": "Skills for reading, reviewing, and cleaning up markdown review sidecar files (.review.yaml)",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "author": {
     "name": "dryotta"
   },
