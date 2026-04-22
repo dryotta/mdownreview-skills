@@ -8,7 +8,7 @@ description: "Use when the user asks to address review comments, or when directe
 ## Step 1 — Read comments
 
 ```bash
-python skills/mdownreview.py read --format json
+python skills/mdownreview.py read --folder $PWD --format json
 ```
 
 Each entry has `reviewFile`, `sourceFile`, and `comments` array. Note the `reviewFile` path — you'll need it when resolving comments.

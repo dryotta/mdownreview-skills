@@ -422,7 +422,7 @@ def iso_now() -> str:
 # ---------------------------------------------------------------------------
 
 def cmd_read(args: argparse.Namespace) -> int:
-    root = args.path or os.getcwd()
+    root = args.folder or os.getcwd()
     show_all = args.all
     fmt = args.format
 
@@ -475,7 +475,7 @@ def cmd_read(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
-    root = args.path or os.getcwd()
+    root = args.folder or os.getcwd()
     dry_run = args.dry_run
 
     files = find_review_files(root)
@@ -681,14 +681,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # read
     p_read = sub.add_parser("read", help="Show review comments")
-    p_read.add_argument("path", nargs="?", default=None, help="Root directory (default: cwd)")
+    p_read.add_argument("--folder", default=None, help="Root directory (default: cwd)")
     p_read.add_argument("--format", choices=["json", "text"], default="text")
     p_read.add_argument("--all", action="store_true", help="Include resolved comments")
     p_read.set_defaults(func=cmd_read)
 
     # cleanup
     p_clean = sub.add_parser("cleanup", help="Delete fully-resolved sidecar files")
-    p_clean.add_argument("path", nargs="?", default=None, help="Root directory (default: cwd)")
+    p_clean.add_argument("--folder", default=None, help="Root directory (default: cwd)")
     p_clean.add_argument("--dry-run", action="store_true", help="Preview without deleting")
     p_clean.set_defaults(func=cmd_cleanup)
 

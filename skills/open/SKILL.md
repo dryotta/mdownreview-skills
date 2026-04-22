@@ -8,10 +8,10 @@ description: "Use to open the mdownreview desktop app so the human can visually 
 Launch the mdownreview desktop app on the current project.
 
 ```bash
-python skills/mdownreview.py open [--folder path] [--file file]
+python skills/mdownreview.py open --folder $PWD [--file file]
 ```
 
-- `--folder`: project folder (default: cwd)
+- `--folder`: project folder to open — always pass `$PWD` or the absolute path of the current workspace
 - `--file`: source filename to jump to directly (e.g. `README.md`, not the `.review.yaml`)
 - Launches in background; exit 0 on success, exit 1 if app not found
 
