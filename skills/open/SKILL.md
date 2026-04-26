@@ -8,22 +8,32 @@ description: "Use to open the mdownreview desktop app so the human can visually 
 Launch the `mdownreview` desktop app on the current project. The app accepts:
 
 ```
-mdownreview --folder <path> [--file <source-file>]
+mdownreview [--folder <path> ...] [--file <source-file> ...] [<positional path> ...]
 ```
 
-- `--folder` — project folder to open (use the absolute path of the current workspace)
-- `--file` — source filename to jump to directly (e.g. `README.md`, **not** the `.review.yaml` sidecar)
+- `--folder` — project folder to open (use the absolute path of the current workspace). Repeatable; the **first** `--folder` becomes the base for resolving relative `--file` and positional paths.
+- `--file` — source file to jump to (e.g. `README.md`, **not** the `.review.yaml` sidecar). **Repeatable** — pass `--file` multiple times to open several files in tabs.
+- Positional paths also work: directories are treated as folders, files as files. Absolute paths bypass the folder base.
+
+Examples:
+
+```
+mdownreview --folder D:\work\proj --file README.md --file src/lib.rs
+mdownreview --folder D:\work\proj docs/spec.md notes.md
+```
 
 Launch it as a **background / detached process** — never block the agent on the GUI:
 
 - **bash / zsh (macOS, Linux)**:
   ```bash
-  ("$BIN" --folder "$PWD" --file "README.md" >/dev/null 2>&1 &) disown
+  ("$BIN" --folder "$PWD" --file README.md --file src/lib.rs >/dev/null 2>&1 &) disown
   ```
 - **PowerShell (Windows)**:
   ```powershell
-  Start-Process -FilePath $bin -ArgumentList @('--folder', $PWD.Path, '--file', 'README.md')
+  Start-Process -FilePath $bin -ArgumentList @('--folder', $PWD.Path, '--file', 'README.md', '--file', 'src/lib.rs')
   ```
+
+The app is single-instance: re-running it while it's already open sends the new args to the existing window instead of starting a second copy.
 
 ## Locating the `mdownreview` binary
 
@@ -46,4 +56,4 @@ If the binary cannot be found anywhere, tell the user to install it from <https:
 
 ## Picking `--file`
 
-If you modified any text files in this session (source code, scripts, markdown, skill files, config — anything), pass the most recently changed one as `--file`. This opens the app directly to that file so the human can leave review comments on your changes. If no files were modified, omit `--file`.
+If you modified any text files in this session (source code, scripts, markdown, skill files, config — anything), pass each modified file as a separate `--file` argument so the human can review every change. If no files were modified, omit `--file`.

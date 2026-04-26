@@ -8,12 +8,14 @@ description: "Use when .review.yaml sidecar files exist in the workspace — rea
 Run the `mdownreview-cli` tool to list unresolved review comments in the current workspace.
 
 ```
-mdownreview-cli read --folder . [--json] [--include-resolved]
+mdownreview-cli read [--folder <dir>] [--file <path>] [--json | --format text|json] [--include-resolved]
 ```
 
-- `--folder .` — scan the current workspace (use `.` or an absolute path)
-- `--json` — machine-parseable output; use this when processing programmatically
-- `--include-resolved` — include already-resolved comments
+- `--folder <dir>` — root to scan (default: current working directory)
+- `--file <path>` — read a single source file or `.review.yaml` sidecar (relative to `--folder`/cwd, or absolute) instead of scanning
+- `--json` — shorthand for `--format json`; use this when processing programmatically
+- `--format text|json` — explicit output format (default: `text`)
+- `--include-resolved` — include already-resolved comments in addition to unresolved ones
 
 JSON output is an array of `{ reviewFile, sourceFile, comments }` objects. Each comment includes `id`, `file`, `line`, `type`, `text`, and `resolved` status.
 

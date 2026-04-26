@@ -11,7 +11,7 @@ description: "Use when the user asks to address review comments, or when directe
 mdownreview-cli read --folder . --json
 ```
 
-Each entry has `reviewFile`, `sourceFile`, and `comments`. You'll pass `sourceFile` plus the comment `id` to `respond` in step 2.
+Each entry has `reviewFile`, `sourceFile`, and `comments`. You'll pass `sourceFile` plus the comment `id` to `respond` in step 2. To focus on a single file's comments, add `--file <path>`.
 
 ## Step 2 — Fix each file
 
@@ -21,14 +21,17 @@ For each source file with unresolved comments:
 2. For each comment:
    - If the feedback is ambiguous or unclear, ask the user a clarifying question before touching the code — wait for their answer.
    - Make the change; ensure it doesn't introduce regressions.
-   - After the fix, mark the comment resolved with a brief response summarizing what was done:
+   - After the fix, mark the comment resolved with a brief response:
      ```
-     mdownreview-cli respond <sourceFile> <comment-id> --response "brief description of what was changed" --resolve
+     mdownreview-cli respond [--folder <dir>] <sourceFile> <comment-id> --response "brief description of what was changed" --resolve
      ```
-   - If a comment can't be addressed (out of scope, contradicts another comment, needs a decision), record a response explaining why — leave it unresolved so the reviewer can decide:
+   - To only record a response without resolving (e.g. when out of scope, contradictory, or needs a reviewer decision):
      ```
-     mdownreview-cli respond <sourceFile> <comment-id> --response "why it couldn't be addressed"
+     mdownreview-cli respond [--folder <dir>] <sourceFile> <comment-id> --response "why it couldn't be addressed"
      ```
+   - To resolve without adding a response, omit `--response` and pass `--resolve` alone.
+
+`<sourceFile>` may be a path to the source file **or** to its `.review.yaml` sidecar; relative paths resolve against `--folder` (or cwd if omitted).
 
 ## Step 3 — Wrap up
 
