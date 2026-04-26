@@ -5,12 +5,16 @@ description: "Use to clean up markdown review sidecar files after all review com
 
 # Clean Up Resolved Review Files
 
-Delete `.review.yaml` / `.review.json` sidecar files where every comment is resolved.
+Delete `.review.yaml` sidecar files where every comment is resolved.
 
-```bash
-python skills/mdownreview.py cleanup --folder $PWD [--dry-run]
+```
+mdownreview-cli cleanup [--folder <dir>] [--dry-run] [--include-unresolved]
 ```
 
-- `--folder`: project folder to scan (always pass `$PWD` or the absolute path of the current workspace)
-- `--dry-run`: preview deletions without executing
-- Only deletes files where ALL comments are resolved
+- `--folder <dir>` — root to scan (default: current working directory)
+- `--dry-run` — preview deletions without removing files
+- `--include-unresolved` — also delete sidecars containing unresolved comments (destructive — only use if the user explicitly confirms they want to discard pending feedback)
+
+By default only sidecars where **every** comment is resolved are deleted.
+
+> See the `read` skill for fallback paths to locate `mdownreview-cli` if it isn't on `PATH`.

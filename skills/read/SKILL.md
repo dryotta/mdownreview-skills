@@ -5,12 +5,25 @@ description: "Use when .review.yaml sidecar files exist in the workspace — rea
 
 # Read Review Comments
 
-```bash
-python skills/mdownreview.py read --folder $PWD [--format json|text] [--all]
+Run the `mdownreview-cli` tool to list unresolved review comments in the current workspace.
+
+```
+mdownreview-cli read [--folder <dir>] [--file <path>] [--json | --format text|json] [--include-resolved]
 ```
 
-- `--folder`: project folder to scan (always pass `$PWD` or the absolute path of the current workspace)
-- `--format json` for machine-parseable output (use this when processing programmatically)
-- `--all` to include already-resolved comments
+- `--folder <dir>` — root to scan (default: current working directory)
+- `--file <path>` — read a single source file or `.review.yaml` sidecar (relative to `--folder`/cwd, or absolute) instead of scanning
+- `--json` — shorthand for `--format json`; use this when processing programmatically
+- `--format text|json` — explicit output format (default: `text`)
+- `--include-resolved` — include already-resolved comments in addition to unresolved ones
 
-Each comment includes: id, file, line, type, text, resolved status.
+JSON output is an array of `{ reviewFile, sourceFile, comments }` objects. Each comment includes `id`, `file`, `line`, `type`, `text`, and `resolved` status.
+
+## Locating `mdownreview-cli`
+
+`mdownreview-cli` is normally on `PATH` after install. If `mdownreview-cli` is not found, fall back to one of these locations:
+
+- **macOS**: `/usr/local/bin/mdownreview-cli`, `~/.local/bin/mdownreview-cli`, or `~/Applications/mdownreview.app/Contents/MacOS/mdownreview-cli`
+- **Windows**: `%LOCALAPPDATA%\Programs\mdownreview\mdownreview-cli.exe` or `%LOCALAPPDATA%\mdownreview\mdownreview-cli.exe`
+
+If it cannot be found anywhere, ask the user to install mdownreview from <https://dryotta.github.io/mdownreview/>.
